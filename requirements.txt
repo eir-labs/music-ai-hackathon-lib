@@ -1,0 +1,5 @@
+python-osc
+waapi-client
+acconeer-exptool
+pyserial
+numpy
