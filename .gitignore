@@ -6,3 +6,6 @@ venv/
 *.prof
 *.wav
 *.aif*
+*.egg-info/
+.pytest_cache/
+music-ai-hackathon-toolkit.zip

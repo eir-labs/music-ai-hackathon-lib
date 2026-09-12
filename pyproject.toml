@@ -1,0 +1,29 @@
+[project]
+name = "kitlib"
+version = "0.1.0"
+description = "Shared OSC runtime for the Music & AI Hackathon 2026 tracks."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = ["python-osc>=1.8"]
+
+# Install only what your track needs. A Pd team on a Raspberry Pi has no
+# reason to pull in the radar SDK; a radar team has no reason to pull Wwise.
+[project.optional-dependencies]
+arduino = ["pyserial"]
+radar = ["acconeer-exptool", "numpy"]
+wwise = ["waapi-client"]
+all = ["kitlib[arduino,radar,wwise]"]
+
+[project.scripts]
+kitlib = "kitlib.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["kitlib*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
