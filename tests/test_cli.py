@@ -27,6 +27,8 @@ MINIMAL_ARGV = [
     ["monitor"],
     ["send", "/x", "1"],
     ["chord", "Cmaj7"],
+    ["sweep"],
+    ["echo", "nowhere.wav"],
     ["wwise", "--map", "/a=B"],
     ["arduino", "COM5"],
     ["radar"],

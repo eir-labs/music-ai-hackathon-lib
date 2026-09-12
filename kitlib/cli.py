@@ -1,9 +1,11 @@
-"""The ``kitlib`` command. Ten subcommands, one bus.
+"""The ``kitlib`` command. Twelve subcommands, one bus.
 
     kitlib contract                 print the shared address namespace
     kitlib monitor                  watch everything arriving on 9000
     kitlib send /wwise/rtpc X 0.5   fire one message by hand
     kitlib chord Cmaj7              what a chord is made of, no hardware needed
+    kitlib sweep --out sweep.wav    the excitation to play at a space
+    kitlib echo rec1.wav rec2.wav   what the echoes say is out there
     kitlib wwise --map ...          run the Wwise bridge
     kitlib arduino COM5             pump an Arduino onto the bus
     kitlib radar                    pump the XE125 onto the bus
@@ -230,6 +232,69 @@ def cmd_chord(args) -> int:
     return 0
 
 
+def cmd_sweep(args) -> int:
+    from . import echo
+
+    try:
+        excitation = echo.sweep(args.seconds, args.rate, args.low, args.high)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    echo.write_wav(args.out, excitation.signal, args.rate)
+    print(f"{excitation!r} -> {args.out}")
+    print(f"Play it at the space and record the result, then: "
+          f"kitlib echo <recording> --sweep-seconds {args.seconds:g}")
+    return 0
+
+
+def cmd_echo(args) -> int:
+    """Deconvolve one or more captures of the same place and say how sure it is."""
+    from . import echo
+
+    survey = echo.Survey(celsius=args.celsius, resolution=args.resolution,
+                         rate=args.rate)
+    for path in args.recording:
+        try:
+            recorded, rate = echo.read_wav(path)
+        except (OSError, ValueError) as exc:
+            print(f"{path}: {exc}", file=sys.stderr)
+            return 1
+        if rate != args.rate:
+            print(f"{path}: recorded at {rate} Hz, expected {args.rate}. "
+                  f"Pass --rate {rate}.", file=sys.stderr)
+            return 2
+
+        excitation = echo.sweep(args.sweep_seconds, rate, args.low, args.high)
+        found = echo.reflections(echo.deconvolve(recorded, excitation), rate,
+                                 floor_db=args.floor, limit=args.limit)
+        survey.add(found)
+        if args.verbose:
+            print(f"{path}: {len(found)} reflections")
+
+    estimates = survey.estimates()
+    if not estimates:
+        print("Nothing above the floor. Either the sweep never reached anything "
+              "or the recording is of the wrong thing.", file=sys.stderr)
+        return 1
+
+    print(f"{survey.captures} captures at {args.celsius:g}C, "
+          f"sound travelling {echo.speed_of_sound(args.celsius):.1f} m/s")
+    for estimate in estimates:
+        bar = "#" * int(round(estimate.confidence * 20))
+        print(f"  {estimate.distance:8.2f} m  +/-{estimate.spread:5.2f}  "
+              f"seen {estimate.seen}/{survey.captures}  {bar}")
+    print(f"\nconfidence {survey.confidence:.3f}")
+    if survey.captures < 2:
+        print("One capture corroborates nothing. Measure it again.")
+
+    if args.send:
+        survey.publish(Bus(host=args.host, port=args.port), args.name)
+        print(f"sent /sensor/{args.name} and /sensor/{args.name}_confidence "
+              f"to {args.host}:{args.port}")
+    return 0
+
+
 def cmd_midi(args) -> int:
     from .sources import midi
 
@@ -363,6 +428,36 @@ def build_parser() -> argparse.ArgumentParser:
     chord.add_argument("--host", default=contract.HOST)
     chord.add_argument("--port", type=int, default=contract.PORT)
     chord.set_defaults(run=cmd_chord)
+
+    sweep = subs.add_parser("sweep", help="write the excitation to play at a space")
+    sweep.add_argument("--out", default="sweep.wav")
+    sweep.add_argument("--seconds", type=float, default=10.0,
+                       help="shorter and repeated beats longer and once, outdoors")
+    sweep.add_argument("--rate", type=int, default=48000)
+    sweep.add_argument("--low", type=float, default=50.0)
+    sweep.add_argument("--high", type=float, default=18000.0)
+    sweep.set_defaults(run=cmd_sweep)
+
+    echo = subs.add_parser("echo", help="what the echoes say is out there")
+    echo.add_argument("recording", nargs="+", help="captures of the same place")
+    echo.add_argument("--sweep-seconds", type=float, default=10.0,
+                      help="the duration you passed to kitlib sweep")
+    echo.add_argument("--celsius", type=float, default=20.0,
+                      help="air temperature; 343 m/s is a warm room, not a lake")
+    echo.add_argument("--rate", type=int, default=48000)
+    echo.add_argument("--low", type=float, default=50.0)
+    echo.add_argument("--high", type=float, default=18000.0)
+    echo.add_argument("--floor", type=float, default=-30.0, metavar="DB")
+    echo.add_argument("--limit", type=int, default=16)
+    echo.add_argument("--resolution", type=float, default=0.05, metavar="M",
+                      help="metres you care about resolving, which sets the scale "
+                           "confidence is judged against")
+    echo.add_argument("--send", action="store_true", help="put it on the bus")
+    echo.add_argument("--name", default="echo")
+    echo.add_argument("--host", default=contract.HOST)
+    echo.add_argument("--port", type=int, default=contract.PORT)
+    echo.add_argument("-v", "--verbose", action="store_true")
+    echo.set_defaults(run=cmd_echo)
 
     midi = subs.add_parser("midi", help="a ChordCat or any MIDI input onto the bus")
     midi.add_argument("serial", nargs="?", metavar="PORT",

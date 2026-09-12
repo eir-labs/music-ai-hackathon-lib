@@ -308,3 +308,35 @@ def install_mido(monkeypatch, incoming=(), inputs=("ChordCat MIDI 1",),
 
     output.opened = opened
     return output
+
+
+# -- a place that does not exist -----------------------------------------
+
+def echo_room(excitation, distances, amplitudes=None, celsius=20.0,
+              noise=0.0, tail=2.0, seed=0):
+    """What a recorder would capture if this sweep were played at that place.
+
+    The direct arrival, then one delayed copy per reflector at twice its
+    distance over the speed of sound, which is the geometry the analysis is
+    supposed to recover. Everything about the room is known, so a test can
+    state distances in metres and assert them back.
+    """
+    from kitlib.echo import speed_of_sound
+
+    rng = np.random.default_rng(seed)
+    speed = speed_of_sound(celsius)
+    amplitudes = amplitudes or [0.5] * len(distances)
+    length = len(excitation.signal) + int(tail * excitation.rate)
+
+    captured = np.zeros(length)
+    captured[:len(excitation.signal)] += excitation.signal
+    for distance, amplitude in zip(distances, amplitudes):
+        start = int(round((2.0 * distance / speed) * excitation.rate))
+        if start + len(excitation.signal) > length:
+            raise ValueError(
+                f"a reflector at {distance} m needs more than {tail}s of tail")
+        captured[start:start + len(excitation.signal)] += (
+            amplitude * excitation.signal)
+    if noise:
+        captured += rng.normal(0.0, noise, length)
+    return captured

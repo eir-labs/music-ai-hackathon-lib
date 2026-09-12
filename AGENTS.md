@@ -29,8 +29,8 @@ Run `kitlib contract` to see the namespace as teams see it.
 
 ```
 pip install -e .            # the library and the CLI, nothing else
-pip install -e ".[arduino]" # or [radar], [wwise], [midi], [all]
-pytest                      # 454 tests, no hardware, about fifteen seconds
+pip install -e ".[arduino]" # or [radar], [wwise], [midi], [echo], [all]
+pytest                      # 507 tests, no hardware, about sixteen seconds
 ```
 
 Install the extra your track needs rather than `requirements.txt`, which pulls
@@ -47,7 +47,7 @@ git submodule update --init --recursive
 
 | Path | State | Notes |
 |---|---|---|
-| `kitlib/` | code, tested | the bus, chords, signal stages, sources, sinks, CLI |
+| `kitlib/` | code, tested | the bus, chords, echo measurement, signal stages, sources, sinks, CLI |
 | `tests/` | code, tested | per-component files plus `test_integration.py` |
 | `sensors/` | code + real docs | Ch3. `Sensor_Kit_Setup.md` is the hard-won part; `iPhone_Sensor_Spec.md` swaps the kit for a phone |
 | `wwise/` | code + real docs | Ch4. The bridge lives in `kitlib/sinks/wwise.py` |
@@ -106,6 +106,10 @@ and `take=` to drop the magnitude, or let the receiving bridge do it with
 **The radar is not a Grove module.** It goes to the PC over USB-C, never near
 the Arduino. See `sensors/XE125_Setup_Windows.md`. Its shipped configuration
 reaches 40 cm, not 40 m, and it reports one peak rather than a shape.
+
+**Sound travels at 334 m/s at four degrees, not the 343 everyone quotes.**
+Temperature is the term that matters and it is a parameter throughout
+`kitlib/echo.py`. Defaulting it puts a hundred-metre measurement out by three.
 
 **One value per address for anything that drives a parameter.** The Wwise
 bridge's `--map` and the MIDI sink's chord mapping both take the first argument

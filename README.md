@@ -42,6 +42,8 @@ kitlib contract                                   the address namespace all six 
 kitlib monitor                                    watch everything arriving on 9000
 kitlib send /wwise/rtpc Proximity 0.5             fire one message by hand
 kitlib chord Cmaj7                                what a chord is made of, no hardware
+kitlib sweep --out sweep.wav                      the excitation to play at a space
+kitlib echo cap1.wav cap2.wav --celsius 4         distances, and how sure they are
 kitlib wwise --map /sensor/radar=Proximity        OSC → Wwise, no game engine
 kitlib arduino COM5 --scale force=fsr402          Arduino serial → bus
 kitlib radar --normalise --smooth 0.15 --rate 60  XE125 → bus
@@ -77,12 +79,13 @@ bus.send("/wwise/rtpc", "Proximity", proximity(reading))
 | `kitlib/bus.py` | send, subscribe by address or glob, serve in the foreground or a thread |
 | `kitlib/signal.py` | scale, smooth, deadband, rate-limit, median, composed with `>>` |
 | `kitlib/chords.py` | name a set of notes, spell a name. No hardware, no MIDI, no bus |
+| `kitlib/echo.py` | sweep, deconvolve, distances to what reflected, confidence from repeats |
 | `kitlib/sources/` | Arduino serial, XE125 radar, MIDI in |
 | `kitlib/sinks/` | Wwise over WAAPI, MIDI out, forwarding to Pd / SuperCollider / Godot |
 
 The presets in `signal.py` carry the real ranges out of `sensors/Sensor_Kit_Setup.md`, so `signal.FSR402` already knows the force sensor tops out near 650 rather than 1023, and `signal.LIGHT_LS06S` that its dark reading is 45 rather than 0.
 
-Tests: `pytest`. 454 of them, no hardware required, about fifteen seconds.
+Tests: `pytest`. 507 of them, no hardware required, about sixteen seconds.
 `tests/test_integration.py` holds the cross-track paths and is where a new
 source or verb proves it landed on the contract rather than beside it.
 

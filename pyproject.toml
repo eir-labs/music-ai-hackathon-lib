@@ -14,7 +14,8 @@ arduino = ["pyserial"]
 radar = ["acconeer-exptool", "numpy"]
 wwise = ["waapi-client"]
 midi = ["mido", "python-rtmidi"]
-all = ["kitlib[arduino,radar,wwise,midi]"]
+echo = ["numpy"]
+all = ["kitlib[arduino,radar,wwise,midi,echo]"]
 
 [project.scripts]
 kitlib = "kitlib.cli:main"
