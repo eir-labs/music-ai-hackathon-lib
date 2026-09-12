@@ -49,7 +49,7 @@ git submodule update --init --recursive
 |---|---|---|
 | `kitlib/` | code, tested | the bus, chords, signal stages, sources, sinks, CLI |
 | `tests/` | code, tested | per-component files plus `test_integration.py` |
-| `sensors/` | code + real docs | Ch3. `Sensor_Kit_Setup.md` is the hard-won part |
+| `sensors/` | code + real docs | Ch3. `Sensor_Kit_Setup.md` is the hard-won part; `iPhone_Sensor_Spec.md` swaps the kit for a phone |
 | `wwise/` | code + real docs | Ch4. The bridge lives in `kitlib/sinks/wwise.py` |
 | `bumochi/` | submodule + notes | Ch5. Upstream code, our notes in `README.md` |
 | `lydia/` | notes only | Ch2. Roland's toolkit is not in this repo |
@@ -104,7 +104,12 @@ and `take=` to drop the magnitude, or let the receiving bridge do it with
 `--map`. Pinned in `TestAcrossMachines`.
 
 **The radar is not a Grove module.** It goes to the PC over USB-C, never near
-the Arduino. See `sensors/XE125_Setup_Windows.md`.
+the Arduino. See `sensors/XE125_Setup_Windows.md`. Its shipped configuration
+reaches 40 cm, not 40 m, and it reports one peak rather than a shape.
+
+**One value per address for anything that drives a parameter.** The Wwise
+bridge's `--map` and the MIDI sink's chord mapping both take the first argument
+and ignore the rest, so packing x and y into one message silently drops the y.
 
 **A MIDI note-on at velocity 0 is a release.** Hardware and sequencers both send
 releases that way. Reading it as a key-down leaves every note held forever, and
