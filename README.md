@@ -4,8 +4,12 @@ Berghotel Rudolfshütte · Sep 11–13, 2026. One repo with the setup docs, glue
 The living version is the wiki — https://wiki.eir.sh/hackathon — where team pages accrete from Discord and coding agents. This repo is the offline-friendly, cloneable subset.
 
 ```
+git submodule update --init --recursive    # fills bumochi/, needed once per clone
 pip install -r requirements.txt
 ```
+
+Travelling light, or on a Raspberry Pi? `pip install -e ".[radar]"` takes only
+what your track needs. The extras are `arduino`, `radar`, `wwise`, `all`.
 
 | Track | Folder | Start with |
 |---|---|---|
@@ -13,7 +17,7 @@ pip install -r requirements.txt
 | Ch2 AI Instruments (Roland & Neutone) | `lydia/` | `README.md` → Roland's DIY doc |
 | Ch3 Sound & Driving (Alps Alpine) | `sensors/` | `Sensor_Kit_Setup.md` **before plugging anything in** |
 | Ch4 Game Sound (Audiokinetic) | `wwise/` | `kitlib wwise` |
-| Ch5 Moving Bodies (academic) | `bumochi/` | upstream BuMoChi |
+| Ch5 Moving Bodies (academic) | `bumochi/` | `README.md` → the vendored BuMoChi submodule |
 | Ch6 Accessibility (AlphaTheta) | `chordcat/` | the Ch6 mentor |
 
 `Challenges.pdf` — the official briefs.
@@ -43,6 +47,15 @@ kitlib radar --normalise --smooth 0.15 --rate 60  XE125 → bus
 kitlib forward --to 127.0.0.1:9001                mirror the bus to Pd, SC, Godot, a laptop
 ```
 
+Crossing a sensor address into a Wwise verb needs the parameter name added and
+any extra readings dropped, because the two namespaces count their arguments
+differently:
+
+```
+kitlib forward --to 192.168.1.42 --pattern /sensor/radar \
+               --rename /wwise/rtpc --lead Proximity --take 1
+```
+
 **When something is not working, run `kitlib monitor` first.** It prints every message arriving on the bus and, on Ctrl-C, how many of each and at what rate. Display is capped per address so a 650 Hz radar cannot scroll the useful lines away.
 
 In your own code:
@@ -65,11 +78,17 @@ bus.send("/wwise/rtpc", "Proximity", proximity(reading))
 
 The presets in `signal.py` carry the real ranges out of `sensors/Sensor_Kit_Setup.md`, so `signal.FSR402` already knows the force sensor tops out near 650 rather than 1023, and `signal.LIGHT_LS06S` that its dark reading is 45 rather than 0.
 
-Install only what your track needs: `pip install -e ".[arduino]"`, `[radar]`, `[wwise]`, or `[all]`.
-
-Tests: `pytest`.
+Tests: `pytest`. 258 of them, no hardware required, about twelve seconds.
+`tests/test_integration.py` holds the cross-track paths and is where a new
+source or verb proves it landed on the contract rather than beside it.
 
 The four original scripts still answer to exactly the commands their READMEs describe. They are thin wrappers over the library now.
+
+## Coding agents
+
+`AGENTS.md` is the entry point: the one rule about the address namespace, which
+track folders hold code and which are deliberately empty, the house conventions,
+and the traps worth knowing before you debug. `CLAUDE.md` points at it.
 
 ## Contributing
 

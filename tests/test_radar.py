@@ -1,87 +1,20 @@
 """The XE125 radar source, against a fake board.
 
 The Acconeer SDK is an optional extra and no radar is plugged into CI, so both
-it and ``pyserial`` are substituted here. The arithmetic under test is the bit
+it and ``pyserial`` are substituted here, through the ``fake_board`` and
+``fake_ports`` fixtures in ``conftest.py``. The arithmetic under test is the bit
 that matters: which bin reflected hardest, and how far away that is.
 """
 from __future__ import annotations
 
 import itertools
-import sys
-import types
 
 import numpy as np
 import pytest
 
+from doubles import frame_peaking_at
 from kitlib import signal
 from kitlib.sources import radar
-
-
-def frame_peaking_at(index: int, magnitude: float = 1.0, points: int = radar.POINTS):
-    """One sweep of complex IQ data with its strongest reflection at ``index``."""
-    sweep = np.full((1, points), 0.01 + 0j)
-    sweep[0, index] = magnitude + 0j
-    return sweep
-
-
-@pytest.fixture
-def fake_ports(monkeypatch):
-    """Install a stand-in ``serial.tools.list_ports``."""
-    def install(*descriptions):
-        ports = [types.SimpleNamespace(device=f"COM{i}", description=text)
-                 for i, text in enumerate(descriptions, start=3)]
-        list_ports = types.ModuleType("serial.tools.list_ports")
-        list_ports.comports = lambda: ports
-        tools = types.ModuleType("serial.tools")
-        tools.list_ports = list_ports
-        monkeypatch.setitem(sys.modules, "serial.tools", tools)
-        monkeypatch.setitem(sys.modules, "serial.tools.list_ports", list_ports)
-    return install
-
-
-@pytest.fixture
-def fake_board(monkeypatch):
-    """Install a stand-in ``acconeer.exptool`` and hand back the call log."""
-    log = {"calls": []}
-
-    def install(frames):
-        stream = iter(frames)
-
-        class Client:
-            @staticmethod
-            def open(serial_port=None):
-                log["port"] = serial_port
-                return Client()
-
-            def setup_session(self, config):
-                log["calls"].append("setup")
-
-            def start_session(self):
-                log["calls"].append("start")
-
-            def get_next(self):
-                try:
-                    return types.SimpleNamespace(frame=next(stream))
-                except StopIteration:
-                    raise KeyboardInterrupt
-
-            def stop_session(self):
-                log["calls"].append("stop")
-
-            def close(self):
-                log["calls"].append("close")
-
-        a121 = types.SimpleNamespace(
-            Client=Client,
-            SessionConfig=lambda spec: ("session", spec),
-            SensorConfig=lambda: "sensor")
-        exptool = types.ModuleType("acconeer.exptool")
-        exptool.a121 = a121
-        monkeypatch.setitem(sys.modules, "acconeer.exptool", exptool)
-        return log
-
-    install.log = log
-    return install
 
 
 class TestGeometry:

@@ -1,9 +1,11 @@
 """Shared fixtures.
 
-Two ideas do most of the work here. A hand-cranked clock lets the time-based
+Three ideas do most of the work here. A hand-cranked clock lets the time-based
 stages be tested exactly, without sleeping. A collector plus a real UDP round
 trip lets the bus be tested for what it actually does, rather than for what its
-dispatcher was asked to do.
+dispatcher was asked to do. And the hardware nobody has plugged in arrives
+through the doubles in ``tests/doubles.py``, installed by the fixtures at the
+bottom of this file.
 """
 from __future__ import annotations
 
@@ -13,7 +15,9 @@ from typing import List, Tuple
 
 import pytest
 
+import doubles
 from kitlib.bus import Bus
+from kitlib.sinks.wwise import WwiseSink
 
 
 class Clock:
@@ -105,3 +109,53 @@ def listening(buses):
 def sender(buses, listening):
     """A Bus pointed at whatever ``listening`` bound."""
     return buses(port=listening.bound[1])
+
+
+# -- hardware that is not plugged in -------------------------------------
+#
+# The doubles themselves live in ``tests/doubles.py``; these fixtures install
+# them. Each returns an ``install`` callable, so a test states what the
+# hardware should do and gets back the log of what it was asked.
+
+@pytest.fixture
+def fake_serial(monkeypatch):
+    """Install a stand-in ``serial`` module. ``install(lines)`` -> the port."""
+    log: dict = {}
+
+    def install(lines):
+        return doubles.install_serial(monkeypatch, lines, log)
+
+    install.log = log
+    return install
+
+
+@pytest.fixture
+def fake_ports(monkeypatch):
+    """Install a stand-in ``serial.tools.list_ports``. ``install(*descriptions)``."""
+    def install(*descriptions):
+        doubles.install_list_ports(monkeypatch, *descriptions)
+    return install
+
+
+@pytest.fixture
+def fake_board(monkeypatch):
+    """Install a stand-in ``acconeer.exptool``. ``install(frames)`` -> the log."""
+    log: dict = {"calls": []}
+
+    def install(frames):
+        return doubles.install_acconeer(monkeypatch, frames, log)
+
+    install.log = log
+    return install
+
+
+@pytest.fixture
+def waapi() -> doubles.FakeClient:
+    """A WAAPI client that records calls instead of making them."""
+    return doubles.FakeClient()
+
+
+@pytest.fixture
+def sink(waapi) -> WwiseSink:
+    """A Wwise sink wired to the recording client."""
+    return WwiseSink(waapi)

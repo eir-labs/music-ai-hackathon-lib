@@ -7,6 +7,8 @@ tested the way they will run it, as a process interrupted with Ctrl-C.
 from __future__ import annotations
 
 import argparse
+import ast
+import inspect
 import signal as signals
 import socket
 import subprocess
@@ -17,6 +19,26 @@ import pytest
 
 from kitlib import cli, contract
 from kitlib.bus import Bus
+
+
+#: The shortest argv that parses, per subcommand.
+MINIMAL_ARGV = [
+    ["contract"],
+    ["monitor"],
+    ["send", "/x", "1"],
+    ["wwise", "--map", "/a=B"],
+    ["arduino", "COM5"],
+    ["radar"],
+    ["forward", "--to", "host:9001"],
+]
+
+
+def reads_of_args(handler) -> set:
+    """Every ``args.<name>`` the handler's own source reads."""
+    tree = ast.parse(inspect.getsource(handler).lstrip())
+    return {node.attr for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name) and node.value.id == "args"}
 
 
 def free_port() -> int:
@@ -63,15 +85,7 @@ class TestParser:
         with pytest.raises(SystemExit):
             cli.build_parser().parse_args([])
 
-    @pytest.mark.parametrize("argv", [
-        ["contract"],
-        ["monitor"],
-        ["send", "/x", "1"],
-        ["wwise", "--map", "/a=B"],
-        ["arduino", "COM5"],
-        ["radar"],
-        ["forward", "--to", "host:9001"],
-    ])
+    @pytest.mark.parametrize("argv", MINIMAL_ARGV)
     def test_every_subcommand_parses_and_binds_a_handler(self, argv):
         args = cli.build_parser().parse_args(argv)
         assert callable(args.run)
@@ -90,6 +104,21 @@ class TestParser:
         args = cli.build_parser().parse_args(
             ["forward", "--to", "a:1", "--to", "b:2"])
         assert args.to == ["a:1", "b:2"]
+
+    @pytest.mark.parametrize("argv", MINIMAL_ARGV)
+    def test_every_option_a_handler_reads_was_added_to_the_parser(self, argv):
+        """A handler reading ``args.x`` that no ``add_argument`` defines.
+
+        Nothing catches this until somebody runs the subcommand, because the
+        handler is only reached with a real bus or a real serial port in front
+        of it. At the event that means the failure surfaces at the worst moment,
+        as an AttributeError from a command the docs told the team to run.
+        """
+        parsed = cli.build_parser().parse_args(argv)
+        missing = sorted(reads_of_args(parsed.run) - set(vars(parsed)))
+        assert not missing, (
+            f"{parsed.run.__name__} reads {missing} but "
+            f"'kitlib {argv[0]}' never parses it")
 
 
 class TestContractCommand:
