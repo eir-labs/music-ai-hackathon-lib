@@ -26,9 +26,12 @@ MINIMAL_ARGV = [
     ["contract"],
     ["monitor"],
     ["send", "/x", "1"],
+    ["chord", "Cmaj7"],
     ["wwise", "--map", "/a=B"],
     ["arduino", "COM5"],
     ["radar"],
+    ["midi"],
+    ["play", "--map", "/a=C,Am"],
     ["forward", "--to", "host:9001"],
 ]
 
@@ -147,6 +150,69 @@ class TestSendCommand:
     def test_it_reports_where_it_sent(self, listening, capsys):
         cli.main(["send", "/x", "1", "--port", str(listening.bound[1])])
         assert f"127.0.0.1:{listening.bound[1]}" in capsys.readouterr().out
+
+
+class TestChordCommand:
+    """The one command a Ch6 team can run with nothing plugged in."""
+
+    def test_it_prints_the_notes_and_the_numbers(self, capsys):
+        assert cli.main(["chord", "Cmaj7"]) == 0
+        printed = capsys.readouterr().out
+        assert "C4 E4 G4 B4" in printed
+        assert "60 64 67 71" in printed
+
+    def test_the_octave_moves_it(self, capsys):
+        cli.main(["chord", "C", "--octave", "3"])
+        assert "C3 E3 G3" in capsys.readouterr().out
+
+    def test_flats_are_available(self, capsys):
+        cli.main(["chord", "Bb7", "--flats"])
+        assert "Bb4 D5 F5 Ab5" in capsys.readouterr().out
+
+    def test_a_name_nobody_recognises_fails_rather_than_guessing(self, capsys):
+        assert cli.main(["chord", "Cwobble"]) == 2
+        assert "unknown chord quality" in capsys.readouterr().err
+
+    def test_it_can_put_the_chord_on_the_bus(self, listening, collector):
+        listening.on(contract.MIDI_CHORD, collector)
+        cli.main(["chord", "Am7", "--send", "--port", str(listening.bound[1])])
+        assert collector.wait_for(1)
+        assert collector.messages[0][1][0] == "Am7"
+
+
+class TestMidiCommand:
+    def test_listing_ports_needs_no_device(self, fake_midi, capsys):
+        fake_midi(inputs=["ChordCat MIDI 1"], outputs=["IAC Driver Bus 1"])
+        assert cli.main(["midi", "--list"]) == 0
+        printed = capsys.readouterr().out
+        assert "ChordCat MIDI 1" in printed
+        assert "IAC Driver Bus 1" in printed
+
+    def test_an_empty_list_says_so_rather_than_printing_nothing(
+            self, fake_midi, capsys):
+        fake_midi(inputs=[], outputs=[])
+        cli.main(["midi", "--list"])
+        assert "(none)" in capsys.readouterr().out
+
+    def test_no_device_reports_rather_than_hangs(self, fake_midi, capsys):
+        fake_midi(inputs=[])
+        assert cli.main(["midi"]) == 1
+        assert "kitlib midi --list" in capsys.readouterr().err
+
+
+class TestPlayCommand:
+    def test_a_malformed_map_is_rejected_before_opening_the_port(self, capsys):
+        assert cli.main(["play", "--map", "/sensor/radar"]) == 2
+        assert "want /osc/addr=C,Am,F,G" in capsys.readouterr().err
+
+    def test_a_typo_in_the_progression_is_rejected_up_front(self, capsys):
+        assert cli.main(["play", "--map", "/sensor/radar=C,Awobble"]) == 2
+        assert "unknown chord quality" in capsys.readouterr().err
+
+    def test_no_midi_output_reports_rather_than_hangs(self, fake_midi, capsys):
+        fake_midi(outputs=[])
+        assert cli.main(["play"]) == 1
+        assert "MIDI output" in capsys.readouterr().err
 
 
 class TestBadArguments:

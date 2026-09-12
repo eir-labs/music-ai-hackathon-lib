@@ -13,7 +13,8 @@ dependencies = ["python-osc>=1.8"]
 arduino = ["pyserial"]
 radar = ["acconeer-exptool", "numpy"]
 wwise = ["waapi-client"]
-all = ["kitlib[arduino,radar,wwise]"]
+midi = ["mido", "python-rtmidi"]
+all = ["kitlib[arduino,radar,wwise,midi]"]
 
 [project.scripts]
 kitlib = "kitlib.cli:main"

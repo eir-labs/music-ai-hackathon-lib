@@ -23,12 +23,13 @@ from typing import NamedTuple
 
 import pytest
 
-from doubles import frame_at_cm
-from kitlib import contract, signal
+from doubles import frame_at_cm, note_on
+from kitlib import chords, contract, signal
 from kitlib.bus import Bus
 from kitlib.sinks.forward import Forward
+from kitlib.sinks.midi import MidiSink
 from kitlib.sinks.wwise import WwiseSink
-from kitlib.sources import arduino, radar
+from kitlib.sources import arduino, midi, radar
 
 #: One plausible value per argument name used in the contract, so a message can
 #: be built from a Spec without the test knowing which verb it is looking at.
@@ -40,6 +41,12 @@ SAMPLE = {
     "float": 0.5,
     "gameObj": 7,
     "x": 1.0, "y": 2.0, "z": 3.0,
+    "ChordName": "Cmaj7",
+    "note": 60,
+    "velocity": 100,
+    "channel": 1,
+    "controller": 74,
+    "value": 64,
 }
 
 #: What each verb is supposed to become on the other side of the bridge.
@@ -54,6 +61,14 @@ WAAPI_FOR = {
 
 REGISTER = "ak.soundengine.registerGameObj"
 RTPC_CALL = WAAPI_FOR[contract.RTPC]
+
+#: What each MIDI verb is supposed to become at the port.
+MIDI_FOR = {
+    contract.MIDI_NOTE: "note_on",
+    contract.MIDI_CHORD: "note_on",
+    contract.MIDI_CC: "control_change",
+    contract.MIDI_PANIC: None,      # releases only what is already sounding
+}
 
 
 def required(spec: contract.Spec) -> list:
@@ -97,7 +112,7 @@ class TestEveryPublishedVerbReachesWwise:
     SuperCollider ``NetAddr``, or another team's Python.
     """
 
-    @pytest.mark.parametrize("address", sorted(contract.SPECS))
+    @pytest.mark.parametrize("address", sorted(contract.WWISE_SPECS))
     def test_the_published_shape_produces_the_right_waapi_call(self, address, bridge):
         sink, bus = bridge.sink, bridge.send
         spec = contract.SPECS[address]
@@ -107,7 +122,7 @@ class TestEveryPublishedVerbReachesWwise:
         assert sink.client.wait_for_of(WAAPI_FOR[address]), \
             f"{address} never became {WAAPI_FOR[address]}"
 
-    @pytest.mark.parametrize("address", sorted(contract.SPECS))
+    @pytest.mark.parametrize("address", sorted(contract.WWISE_SPECS))
     def test_the_optional_arguments_are_genuinely_optional(self, address, bridge):
         """A ``?`` in the contract means a patch may omit it and still be heard."""
         sink, bus = bridge.sink, bridge.send
@@ -348,6 +363,129 @@ class TestAcrossMachines:
 
         assert collector.wait_for(2)
         assert collector.addresses == [radar.ADDRESS, radar.ADDRESS]
+
+
+@pytest.fixture
+def keyboard(fake_midi, listening):
+    """A MIDI sink attached to a serving bus, with a sender pointed at it."""
+    port = fake_midi()
+    sink = MidiSink(port)
+    sink.attach(listening)
+    return Bridge(sink, listening, Bus(port=listening.bound[1])), port
+
+
+class TestEveryPublishedMidiVerbReachesThePort:
+    """The same promise as the Wwise verbs, for the other sink.
+
+    Add a verb to ``contract.MIDI_SPECS`` and forget to wire it into
+    ``MidiSink.attach`` and these fail with the verb's own name.
+    """
+
+    @pytest.mark.parametrize("address", sorted(contract.MIDI_SPECS))
+    def test_the_published_shape_is_accepted_without_error(
+            self, address, keyboard, capsys):
+        bridge, port = keyboard
+        spec = contract.SPECS[address]
+
+        bridge.send.send(address, *required(spec))
+
+        expected = MIDI_FOR[address]
+        if expected is None:               # panic releases nothing when nothing sounds
+            port.settle()
+        else:
+            assert port.wait_for(1), f"{address} produced no MIDI at all"
+            assert port.sent[0].type == expected
+        assert "MIDI error" not in capsys.readouterr().err
+
+    @pytest.mark.parametrize("address", sorted(contract.MIDI_SPECS))
+    def test_the_optional_arguments_are_genuinely_optional(self, address, keyboard):
+        """A ``?`` in the contract means a patch may omit it and still be heard."""
+        bridge, port = keyboard
+        spec = contract.SPECS[address]
+
+        bridge.send.send(address, *every(spec))
+        bridge.send.send(address, *required(spec))
+
+        if MIDI_FOR[address] is not None:
+            assert port.wait_for(2)
+
+    def test_a_chord_name_arrives_as_the_notes_of_that_chord(self, keyboard):
+        bridge, port = keyboard
+
+        bridge.send.send(contract.MIDI_CHORD, "Cmaj7")
+
+        assert port.wait_for(4)
+        assert port.notes_on() == chords.spell("Cmaj7")
+
+
+class TestChordCatToTheRestOfTheEvent:
+    """Ch6 to anywhere: a chord played on the kit reaching another track."""
+
+    def test_a_chord_played_on_the_keyboard_lands_on_the_bus_named(
+            self, fake_midi, listening, collector, buses):
+        listening.on(contract.CHORD_NAME, collector)
+        fake_midi(incoming=[note_on(n) for n in chords.spell("Am7")])
+
+        midi.run(bus=buses(port=listening.bound[1]))
+
+        assert collector.wait_for(1)
+        assert collector.messages[-1][1] == ("Am7", 9, "m7")
+
+    def test_a_chord_can_drive_a_wwise_switch_without_anyone_knowing_midi(
+            self, bridge, fake_midi, buses):
+        """The whole point of a shared namespace.
+
+        A Ch4 team forwards ``/chord/name`` into their own switch group. They
+        never learn what a MIDI note number is, and the Ch6 team never learns
+        what a switch is.
+        """
+        sink, wwise_bus = bridge.sink, bridge.send
+
+        near = buses(listen_port=0)
+        Forward(buses(port=wwise_bus.port)).route(
+            contract.CHORD_NAME, to=contract.SWITCH,
+            lead=("Harmony",), take=1).attach(near)
+        near.start()
+
+        fake_midi(incoming=[note_on(n) for n in chords.spell("Am7")])
+        midi.run(bus=buses(port=near.bound[1]))
+
+        # Played one key at a time, the hand passes through Am on the way to
+        # Am7, and every step is published. What matters is where it lands.
+        assert sink.client.wait_for_of("ak.soundengine.setSwitch", 2)
+        assert sink.client.of("ak.soundengine.setSwitch")[-1] == {
+            "switchGroup": "Harmony", "switchState": "Am7", "gameObject": 1}
+
+    def test_a_radar_can_play_the_keyboard_through_a_progression(
+            self, keyboard, fake_board, buses):
+        """Ch3 to Ch6, the accessible-instrument shape.
+
+        A hand moving in front of a radar walks a chord progression. Nothing in
+        the chain knows about anything else in it.
+        """
+        bridge, port = keyboard
+        bridge.sink.map_chord(bridge.listen, radar.ADDRESS, ["C", "Am", "F", "G"])
+        fake_board([frame_at_cm(30.0)])     # three quarters of the way along
+
+        radar.run("COM3", bridge.send, stage=signal.RADAR_CM)
+
+        assert port.wait_for(len(chords.spell("G")))
+        assert port.notes_on() == chords.spell("G")
+
+    def test_the_keyboard_and_wwise_can_share_one_bus(
+            self, fake_midi, listening, waapi, buses):
+        """Ch4 and Ch6 on one laptop, which is what the kit table looks like."""
+        port = fake_midi()
+        MidiSink(port).attach(listening)
+        WwiseSink(waapi).attach(listening)
+        bus = buses(port=listening.bound[1])
+
+        bus.send(contract.MIDI_CHORD, "C")
+        bus.send(contract.RTPC, "Proximity", 0.5)
+
+        assert port.wait_for(3)
+        assert waapi.wait_for_of(RTPC_CALL)
+        assert port.notes_on() == chords.spell("C")
 
 
 class TestTheBusStaysUsableWhileShared:

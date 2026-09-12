@@ -189,3 +189,122 @@ def install_acconeer(monkeypatch, frames, log: dict) -> dict:
     exptool.a121 = a121
     monkeypatch.setitem(sys.modules, "acconeer.exptool", exptool)
     return log
+
+
+# -- MIDI ----------------------------------------------------------------
+
+class Message:
+    """A stand-in for ``mido.Message``, which is just named fields.
+
+    Constructing one validates nothing, deliberately. The real library raises
+    on an out-of-range note, and the sink is supposed to report that and keep
+    running rather than die, so a test needs to be able to provoke it.
+    """
+
+    def __init__(self, type, **fields):
+        self.type = type
+        self.note = fields.get("note")
+        self.velocity = fields.get("velocity")
+        self.control = fields.get("control")
+        self.value = fields.get("value")
+        self.channel = fields.get("channel")
+        self.fields = fields
+
+    def __eq__(self, other):
+        return (isinstance(other, Message) and self.type == other.type
+                and self.fields == other.fields)
+
+    def __repr__(self):
+        inner = ", ".join(f"{k}={v!r}" for k, v in self.fields.items())
+        return f"Message({self.type!r}, {inner})"
+
+
+def note_on(note, velocity=100, channel=0) -> Message:
+    return Message("note_on", note=note, velocity=velocity, channel=channel)
+
+
+def note_off(note, channel=0) -> Message:
+    return Message("note_off", note=note, velocity=0, channel=channel)
+
+
+class FakeMidiInput:
+    """A MIDI input that replays canned messages, then looks like Ctrl-C."""
+
+    def __init__(self, incoming):
+        self._incoming = list(incoming)
+        self.closed = False
+
+    def __enter__(self) -> "FakeMidiInput":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.closed = True
+
+    def __iter__(self):
+        yield from self._incoming
+        raise KeyboardInterrupt  # what a user pressing Ctrl-C looks like
+
+
+class FakeMidiOutput:
+    """A MIDI output that records what was sent; can be told to fail."""
+
+    def __init__(self, fail: bool = False):
+        self.sent = []
+        self.fail = fail
+        self.closed = False
+
+    def send(self, message) -> None:
+        if self.fail:
+            raise ValueError("data byte must be in range 0..127")
+        self.sent.append(message)
+
+    def close(self) -> None:
+        self.closed = True
+
+    def wait_for(self, count: int = 1, timeout: float = 2.0) -> bool:
+        """Block until ``count`` messages have been sent. False on timeout.
+
+        Messages reach this port across a real UDP socket and a server thread
+        whenever a bus is in front of it, so asserting too early sees nothing.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and len(self.sent) < count:
+            time.sleep(0.005)
+        return len(self.sent) >= count
+
+    def settle(self, seconds: float = 0.25) -> None:
+        """Give stray messages a chance to arrive, for 'nothing else came' checks."""
+        time.sleep(seconds)
+
+    def of(self, kind: str):
+        """Just the messages of one type, in order."""
+        return [m for m in self.sent if m.type == kind]
+
+    def notes_on(self):
+        return [m.note for m in self.sent if m.type == "note_on" and m.velocity]
+
+    def notes_off(self):
+        return [m.note for m in self.sent
+                if m.type == "note_off" or (m.type == "note_on" and not m.velocity)]
+
+
+def install_mido(monkeypatch, incoming=(), inputs=("ChordCat MIDI 1",),
+                 outputs=("ChordCat MIDI 1",), fail: bool = False):
+    """Put a stand-in ``mido`` in front of the import. Returns the output port."""
+    output = FakeMidiOutput(fail=fail)
+    opened = {"input": None}
+
+    def open_input(name=None):
+        opened["input"] = name
+        return FakeMidiInput(incoming)
+
+    module = types.ModuleType("mido")
+    module.Message = Message
+    module.get_input_names = lambda: list(inputs)
+    module.get_output_names = lambda: list(outputs)
+    module.open_input = open_input
+    module.open_output = lambda name=None: output
+    monkeypatch.setitem(sys.modules, "mido", module)
+
+    output.opened = opened
+    return output

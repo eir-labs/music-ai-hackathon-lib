@@ -150,6 +150,14 @@ def fake_board(monkeypatch):
 
 
 @pytest.fixture
+def fake_midi(monkeypatch):
+    """Install a stand-in ``mido``. ``install(incoming=...)`` -> the output port."""
+    def install(**kwargs):
+        return doubles.install_mido(monkeypatch, **kwargs)
+    return install
+
+
+@pytest.fixture
 def waapi() -> doubles.FakeClient:
     """A WAAPI client that records calls instead of making them."""
     return doubles.FakeClient()

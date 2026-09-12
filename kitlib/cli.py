@@ -1,11 +1,14 @@
-"""The ``kitlib`` command. Seven subcommands, one bus.
+"""The ``kitlib`` command. Ten subcommands, one bus.
 
     kitlib contract                 print the shared address namespace
     kitlib monitor                  watch everything arriving on 9000
     kitlib send /wwise/rtpc X 0.5   fire one message by hand
+    kitlib chord Cmaj7              what a chord is made of, no hardware needed
     kitlib wwise --map ...          run the Wwise bridge
     kitlib arduino COM5             pump an Arduino onto the bus
     kitlib radar                    pump the XE125 onto the bus
+    kitlib midi                     pump a ChordCat or any MIDI in onto the bus
+    kitlib play --map ...           bus to MIDI out, play the hardware back
     kitlib forward --to host:9001   mirror the bus elsewhere
 """
 from __future__ import annotations
@@ -16,7 +19,7 @@ import time
 from collections import Counter
 from typing import List
 
-from . import contract, signal
+from . import chords, contract, signal
 from .bus import Bus
 
 
@@ -207,6 +210,89 @@ def cmd_forward(args) -> int:
     return 0
 
 
+def cmd_chord(args) -> int:
+    """What a chord is made of. Needs no hardware, no MIDI, nothing plugged in.
+
+    The one command a Ch6 team can run on the plane.
+    """
+    try:
+        notes = chords.spell(args.name, args.octave)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    spelled = " ".join(chords.note_name(n, args.flats) for n in notes)
+    print(f"{args.name:<10} {spelled:<24} {' '.join(str(n) for n in notes)}")
+    if args.send:
+        Bus(host=args.host, port=args.port).send(
+            contract.MIDI_CHORD, args.name, args.velocity)
+        print(f"sent {contract.MIDI_CHORD} {args.name} to {args.host}:{args.port}")
+    return 0
+
+
+def cmd_midi(args) -> int:
+    from .sources import midi
+
+    if args.list:
+        for heading, names in (("inputs", midi.inputs()), ("outputs", midi.outputs())):
+            print(f"{heading}:")
+            for name in names:
+                print(f"  {name}")
+            if not names:
+                print("  (none)")
+        return 0
+
+    print(f"MIDI -> {args.host}:{args.port}")
+    try:
+        midi.run(args.serial, Bus(args.host, args.port), args.channel, args.verbose)
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_play(args) -> int:
+    from .sinks.midi import CannotReachMidi, MidiSink
+
+    # Check the mappings before opening the port, so a typo reads as a typo.
+    mappings = []
+    for mapping in args.map:
+        address, _, names = mapping.partition("=")
+        progression = [name for name in names.split(",") if name]
+        if not progression:
+            print(f"bad --map {mapping!r}, want /osc/addr=C,Am,F,G", file=sys.stderr)
+            return 2
+        try:
+            for name in progression:
+                chords.parse(name)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        mappings.append((address, progression))
+
+    try:
+        sink = MidiSink.open(args.out, args.verbose)
+    except CannotReachMidi as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+    bus = Bus(bind=args.bind, listen_port=args.port)
+    sink.attach(bus)
+    for address, progression in mappings:
+        sink.map_chord(bus, address, progression, args.velocity)
+        print(f"  {address} -> {' '.join(progression)}")
+
+    print(f"Listening for OSC on {args.bind}:{args.port}  (Ctrl-C to quit)")
+    try:
+        bus.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        bus.close()
+        sink.close()
+    return 0
+
+
 # -- wiring --------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -265,6 +351,42 @@ def build_parser() -> argparse.ArgumentParser:
     radar.add_argument("--rate", type=float, metavar="HZ", help="cap the send rate")
     radar.add_argument("-v", "--verbose", action="store_true")
     radar.set_defaults(run=cmd_radar)
+
+    chord = subs.add_parser("chord", help="what a chord is made of")
+    chord.add_argument("name", help="e.g. Cmaj7, F#m, Bb7, Dsus4")
+    chord.add_argument("--octave", type=int, default=4,
+                       help="where the root sits; middle C is octave 4")
+    chord.add_argument("--flats", action="store_true", help="spell with flats")
+    chord.add_argument("--send", action="store_true",
+                       help=f"also put it on the bus as {contract.MIDI_CHORD}")
+    chord.add_argument("--velocity", type=int, default=100)
+    chord.add_argument("--host", default=contract.HOST)
+    chord.add_argument("--port", type=int, default=contract.PORT)
+    chord.set_defaults(run=cmd_chord)
+
+    midi = subs.add_parser("midi", help="a ChordCat or any MIDI input onto the bus")
+    midi.add_argument("serial", nargs="?", metavar="PORT",
+                      help="MIDI input name; guessed if omitted")
+    midi.add_argument("--list", action="store_true",
+                      help="show the MIDI ports this machine can see, then exit")
+    midi.add_argument("--channel", type=int, default=None, metavar="1-16",
+                      help="listen to one channel only, as printed on hardware")
+    midi.add_argument("--host", default=contract.HOST)
+    midi.add_argument("--port", type=int, default=contract.PORT)
+    midi.add_argument("-v", "--verbose", action="store_true")
+    midi.set_defaults(run=cmd_midi)
+
+    play = subs.add_parser("play", help="the bus back out to MIDI")
+    play.add_argument("--out", default=None, metavar="PORT",
+                      help="MIDI output name; guessed if omitted")
+    play.add_argument("--map", action="append", default=[],
+                      metavar="/osc/addr=C,Am,F,G",
+                      help="walk a progression from one 0..1 address (repeatable)")
+    play.add_argument("--velocity", type=int, default=100)
+    play.add_argument("--port", type=int, default=contract.PORT)
+    play.add_argument("--bind", default="0.0.0.0")
+    play.add_argument("-v", "--verbose", action="store_true")
+    play.set_defaults(run=cmd_play)
 
     forward = subs.add_parser("forward", help="mirror the bus to Pd, SC, Godot, a laptop")
     forward.add_argument("--to", action="append", required=True, metavar="HOST:PORT",
