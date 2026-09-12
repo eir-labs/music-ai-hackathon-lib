@@ -191,7 +191,8 @@ def cmd_forward(args) -> int:
     targets = [Bus(*_host_port(t, contract.PORT + 1)) for t in args.to]
     forward = Forward(*targets)
     forward.route(args.pattern, to=args.rename,
-                  stage=_preset(args.scale) if args.scale else None)
+                  stage=_preset(args.scale) if args.scale else None,
+                  lead=tuple(_number(a) for a in args.lead), take=args.take)
     bus = Bus(bind=args.bind, listen_port=args.port)
     forward.attach(bus)
 
@@ -270,6 +271,14 @@ def build_parser() -> argparse.ArgumentParser:
                          help="repeatable, to fan out across machines")
     forward.add_argument("--pattern", default="/*", help="address glob to forward")
     forward.add_argument("--rename", default=None, help="outgoing address")
+    forward.add_argument("--lead", action="append", default=[], metavar="ARG",
+                         help="prepend a fixed argument, repeatable. Renaming to "
+                              "a Wwise verb needs one: --rename /wwise/rtpc "
+                              "--lead Proximity")
+    forward.add_argument("--take", type=int, default=None, metavar="N",
+                         help="keep only the first N incoming arguments. "
+                              "/sensor/radar carries <cm> <mag>, so crossing "
+                              "into /wwise/rtpc wants --take 1")
     forward.add_argument("--scale", default=None,
                          help=f"presets: {', '.join(sorted(signal.PRESETS))}")
     forward.add_argument("--port", type=int, default=contract.PORT)
