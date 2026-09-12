@@ -18,7 +18,7 @@ what your track needs. The extras are `arduino`, `radar`, `wwise`, `all`.
 | Ch3 Sound & Driving (Alps Alpine) | `sensors/` | `Sensor_Kit_Setup.md` **before plugging anything in** |
 | Ch4 Game Sound (Audiokinetic) | `wwise/` | `kitlib wwise` |
 | Ch5 Moving Bodies (academic) | `bumochi/` | `README.md` → the vendored BuMoChi submodule |
-| Ch6 Accessibility (AlphaTheta) | `chordcat/` | the Ch6 mentor |
+| Ch6 Accessibility (AlphaTheta) | `chordcat/` | `kitlib chord Cmaj7`, then `README.md` |
 
 `Challenges.pdf` — the official briefs.
 
@@ -27,10 +27,10 @@ what your track needs. The extras are `arduino`, `radar`, `wwise`, `all`.
 Everything here talks OSC on UDP 9000 so tracks can borrow from each other:
 
 ```
-Arduino  ──serial──▶ kitlib arduino ──┐
-XE125    ──USB─────▶ kitlib radar ────┤
-BuMoChi / SC / Pd ────────────────────┼──▶ OSC :9000 ──▶ kitlib wwise ──▶ Wwise
-                                      └──▶ kitlib forward ──▶ Pd / SC / Godot / another laptop
+Arduino  ──serial──▶ kitlib arduino ──┐                 ┌──▶ kitlib wwise ──▶ Wwise
+XE125    ──USB─────▶ kitlib radar ────┤                 ├──▶ kitlib play ──▶ ChordCat / any synth
+ChordCat ──MIDI────▶ kitlib midi ─────┼──▶ OSC :9000 ──▶┤
+BuMoChi / SC / Pd ────────────────────┘                 └──▶ kitlib forward ──▶ Pd / SC / Godot / a laptop
 ```
 
 ## kitlib
@@ -41,9 +41,12 @@ The shared library, in `kitlib/`. Installing above puts a `kitlib` command on yo
 kitlib contract                                   the address namespace all six tracks agree on
 kitlib monitor                                    watch everything arriving on 9000
 kitlib send /wwise/rtpc Proximity 0.5             fire one message by hand
+kitlib chord Cmaj7                                what a chord is made of, no hardware
 kitlib wwise --map /sensor/radar=Proximity        OSC → Wwise, no game engine
 kitlib arduino COM5 --scale force=fsr402          Arduino serial → bus
 kitlib radar --normalise --smooth 0.15 --rate 60  XE125 → bus
+kitlib midi                                       ChordCat / any MIDI in → bus
+kitlib play --map /sensor/radar=C,Am,F,G          bus → MIDI out, play the hardware
 kitlib forward --to 127.0.0.1:9001                mirror the bus to Pd, SC, Godot, a laptop
 ```
 
@@ -73,12 +76,13 @@ bus.send("/wwise/rtpc", "Proximity", proximity(reading))
 | `kitlib/contract.py` | the OSC address namespace. The one thing all six tracks agree on |
 | `kitlib/bus.py` | send, subscribe by address or glob, serve in the foreground or a thread |
 | `kitlib/signal.py` | scale, smooth, deadband, rate-limit, median, composed with `>>` |
-| `kitlib/sources/` | Arduino serial, XE125 radar |
-| `kitlib/sinks/` | Wwise over WAAPI, forwarding to Pd / SuperCollider / Godot |
+| `kitlib/chords.py` | name a set of notes, spell a name. No hardware, no MIDI, no bus |
+| `kitlib/sources/` | Arduino serial, XE125 radar, MIDI in |
+| `kitlib/sinks/` | Wwise over WAAPI, MIDI out, forwarding to Pd / SuperCollider / Godot |
 
 The presets in `signal.py` carry the real ranges out of `sensors/Sensor_Kit_Setup.md`, so `signal.FSR402` already knows the force sensor tops out near 650 rather than 1023, and `signal.LIGHT_LS06S` that its dark reading is 45 rather than 0.
 
-Tests: `pytest`. 258 of them, no hardware required, about twelve seconds.
+Tests: `pytest`. 454 of them, no hardware required, about fifteen seconds.
 `tests/test_integration.py` holds the cross-track paths and is where a new
 source or verb proves it landed on the contract rather than beside it.
 

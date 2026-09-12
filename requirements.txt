@@ -7,3 +7,5 @@ waapi-client
 acconeer-exptool
 pyserial
 numpy
+mido
+python-rtmidi
