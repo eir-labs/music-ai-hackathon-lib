@@ -16,7 +16,7 @@ values on the way.
 """
 from __future__ import annotations
 
-from typing import List, NamedTuple, Optional
+from typing import List, NamedTuple, Optional, Tuple
 
 from ..bus import Bus
 from ..signal import Stage
@@ -26,6 +26,8 @@ class Route(NamedTuple):
     pattern: str
     to: Optional[str]
     stage: Optional[Stage]
+    lead: Tuple = ()
+    take: Optional[int] = None
 
 
 class Forward:
@@ -38,18 +40,32 @@ class Forward:
         self.routes: List[Route] = []
 
     def route(self, pattern: str = "/*", to: Optional[str] = None,
-              stage: Optional[Stage] = None) -> "Forward":
+              stage: Optional[Stage] = None, lead: Tuple = (),
+              take: Optional[int] = None) -> "Forward":
         """Forward addresses matching ``pattern``, chainable.
 
-        ``to`` renames the outgoing address, so a Ch3 radar can arrive at a Ch4
-        Wwise bridge already shaped as a game parameter::
+        ``to`` renames the outgoing address, ``lead`` prepends fixed arguments
+        and ``take`` keeps only the first N incoming ones. Reshaping one
+        namespace into another usually needs all three, because the two sides
+        count their arguments differently. A Ch3 radar publishes
+        ``/sensor/radar <cm> <magnitude>``; ``/wwise/rtpc`` wants
+        ``<RtpcName> <float> <gameObj?>``, so the name goes on the front and
+        the magnitude has to come off the back or it lands in the game-object
+        slot::
 
-            Forward(wwise).route("/sensor/radar", to="/wwise/rtpc")
+            Forward(wwise).route("/sensor/radar", to="/wwise/rtpc",
+                                 lead=("Proximity",), take=1)
+            # /sensor/radar 12.5 880.0  ->  /wwise/rtpc Proximity 12.5
 
-        ``stage`` conditions the first argument; returning ``None`` drops the
-        message rather than sending a stale value on.
+        Rename with neither and the distance becomes the RTPC name, which is
+        why ``kitlib contract`` is worth reading before reshaping. Forwarding
+        a namespace to another machine unchanged needs none of them.
+
+        ``stage`` conditions the first argument of the incoming message, before
+        ``take`` trims and ``lead`` goes on the front; returning ``None`` drops
+        the message rather than sending a stale value on.
         """
-        self.routes.append(Route(pattern, to, stage))
+        self.routes.append(Route(pattern, to, stage, tuple(lead), take))
         return self
 
     def _send(self, route: Route, address: str, values) -> None:
@@ -59,7 +75,10 @@ class Forward:
             if conditioned is None:
                 return
             values[0] = conditioned
+        if route.take is not None:
+            values = values[:route.take]
         out = route.to or address
+        values = list(route.lead) + values
         for target in self.targets:
             target.send(out, *values)
 

@@ -1,59 +1,17 @@
 """The Arduino serial source, against a fake port.
 
 ``pyserial`` is an optional extra, so the module imports it inside the function
-that needs it. That is also what makes it substitutable here.
+that needs it. That is also what makes it substitutable here; the ``fake_serial``
+fixture is in ``conftest.py``.
 """
 from __future__ import annotations
 
 import itertools
-import sys
-import types
 
 import pytest
 
 from kitlib import signal
 from kitlib.sources import arduino
-
-
-class _FakePort:
-    def __init__(self, lines, log):
-        self._lines = iter(lines)
-        self.log = log
-        self.closed = False
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self.closed = True
-
-    def readline(self) -> bytes:
-        try:
-            return next(self._lines)
-        except StopIteration:
-            raise KeyboardInterrupt  # what a user pressing Ctrl-C looks like
-
-
-@pytest.fixture
-def fake_serial(monkeypatch):
-    """Install a stand-in ``serial`` module and hand back the call log."""
-    log = {}
-
-    def install(lines):
-        encoded = [line if isinstance(line, bytes) else line.encode() for line in lines]
-        port = _FakePort(encoded, log)
-
-        def Serial(device, baud, timeout=None):
-            log.update(device=device, baud=baud, timeout=timeout)
-            return port
-
-        module = types.ModuleType("serial")
-        module.Serial = Serial
-        monkeypatch.setitem(sys.modules, "serial", module)
-        return port
-
-    install.log = log
-    return install
 
 
 class TestParse:

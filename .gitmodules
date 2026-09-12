@@ -1,0 +1,3 @@
+[submodule "bumochi/BuMoChi"]
+	path = bumochi/BuMoChi
+	url = https://github.com/iani/BuMoChi

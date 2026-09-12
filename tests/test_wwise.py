@@ -2,7 +2,8 @@
 
 No Wwise installation is involved. What is under test is the translation from
 the six OSC verbs into the WAAPI calls Wwise expects, and the game-object
-bookkeeping that has to happen before any of them will work.
+bookkeeping that has to happen before any of them will work. The ``sink`` and
+``waapi`` fixtures are in ``conftest.py``.
 """
 from __future__ import annotations
 
@@ -14,44 +15,9 @@ import types
 
 import pytest
 
+from doubles import FakeClient
 from kitlib import signal
 from kitlib.sinks.wwise import CannotReachWwise, WwiseSink
-
-
-class FakeClient:
-    """Records calls; can be told to fail."""
-
-    def __init__(self, fail=False, info=None):
-        self.calls = []
-        self.fail = fail
-        self.disconnected = False
-        self.info = info or {"displayName": "Wwise",
-                             "version": {"displayName": "2023.1.4"}}
-
-    def call(self, uri, args=None):
-        if uri == "ak.wwise.core.getInfo":
-            return self.info
-        self.calls.append((uri, args))
-        if self.fail:
-            raise RuntimeError("boom")
-        return {}
-
-    def disconnect(self):
-        self.disconnected = True
-
-    def uris(self):
-        return [uri for uri, _ in self.calls]
-
-    def wait_for(self, count, timeout=2.0):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline and len(self.calls) < count:
-            time.sleep(0.005)
-        return len(self.calls) >= count
-
-
-@pytest.fixture
-def sink():
-    return WwiseSink(FakeClient())
 
 
 class TestGameObjects:
