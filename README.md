@@ -12,7 +12,7 @@ pip install -r requirements.txt
 | Ch1 Sound & Nature (Austria Tourism) | `recorders/` | the recorders at the kit table |
 | Ch2 AI Instruments (Roland & Neutone) | `lydia/` | `README.md` → Roland's DIY doc |
 | Ch3 Sound & Driving (Alps Alpine) | `sensors/` | `Sensor_Kit_Setup.md` **before plugging anything in** |
-| Ch4 Game Sound (Audiokinetic) | `wwise/` | `osc2wwise.py` |
+| Ch4 Game Sound (Audiokinetic) | `wwise/` | `kitlib wwise` |
 | Ch5 Moving Bodies (academic) | `bumochi/` | upstream BuMoChi |
 | Ch6 Accessibility (AlphaTheta) | `chordcat/` | the Ch6 mentor |
 
@@ -23,11 +23,53 @@ pip install -r requirements.txt
 Everything here talks OSC on UDP 9000 so tracks can borrow from each other:
 
 ```
-Arduino  ──serial──▶ sensors/arduino_serial_to_osc.py ──┐
-XE125    ──USB─────▶ sensors/xe125_to_osc.py ───────────┤
-BuMoChi / SC / Pd ──────────────────────────────────────┼──▶ OSC :9000 ──▶ wwise/osc2wwise.py ──▶ Wwise
-                                                        └──▶ Pd [udpreceive] / SC OSCdef / Godot / anything
+Arduino  ──serial──▶ kitlib arduino ──┐
+XE125    ──USB─────▶ kitlib radar ────┤
+BuMoChi / SC / Pd ────────────────────┼──▶ OSC :9000 ──▶ kitlib wwise ──▶ Wwise
+                                      └──▶ kitlib forward ──▶ Pd / SC / Godot / another laptop
 ```
+
+## kitlib
+
+The shared library, in `kitlib/`. Installing above puts a `kitlib` command on your path.
+
+```
+kitlib contract                                   the address namespace all six tracks agree on
+kitlib monitor                                    watch everything arriving on 9000
+kitlib send /wwise/rtpc Proximity 0.5             fire one message by hand
+kitlib wwise --map /sensor/radar=Proximity        OSC → Wwise, no game engine
+kitlib arduino COM5 --scale force=fsr402          Arduino serial → bus
+kitlib radar --normalise --smooth 0.15 --rate 60  XE125 → bus
+kitlib forward --to 127.0.0.1:9001                mirror the bus to Pd, SC, Godot, a laptop
+```
+
+**When something is not working, run `kitlib monitor` first.** It prints every message arriving on the bus and, on Ctrl-C, how many of each and at what rate. Display is capped per address so a 650 Hz radar cannot scroll the useful lines away.
+
+In your own code:
+
+```python
+from kitlib import Bus, signal
+
+bus = Bus()
+proximity = signal.RADAR_CM >> signal.Smooth(0.15) >> signal.RateLimit(60)
+bus.send("/wwise/rtpc", "Proximity", proximity(reading))
+```
+
+| Module | What |
+|---|---|
+| `kitlib/contract.py` | the OSC address namespace. The one thing all six tracks agree on |
+| `kitlib/bus.py` | send, subscribe by address or glob, serve in the foreground or a thread |
+| `kitlib/signal.py` | scale, smooth, deadband, rate-limit, median, composed with `>>` |
+| `kitlib/sources/` | Arduino serial, XE125 radar |
+| `kitlib/sinks/` | Wwise over WAAPI, forwarding to Pd / SuperCollider / Godot |
+
+The presets in `signal.py` carry the real ranges out of `sensors/Sensor_Kit_Setup.md`, so `signal.FSR402` already knows the force sensor tops out near 650 rather than 1023, and `signal.LIGHT_LS06S` that its dark reading is 45 rather than 0.
+
+Install only what your track needs: `pip install -e ".[arduino]"`, `[radar]`, `[wwise]`, or `[all]`.
+
+Tests: `pytest`.
+
+The four original scripts still answer to exactly the commands their READMEs describe. They are thin wrappers over the library now.
 
 ## Contributing
 
