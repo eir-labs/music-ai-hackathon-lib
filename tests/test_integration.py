@@ -428,8 +428,11 @@ class TestChordCatToTheRestOfTheEvent:
 
         midi.run(bus=buses(port=listening.bound[1]))
 
-        assert collector.wait_for(1)
-        assert collector.messages[-1][1] == ("Am7", 9, "m7")
+        # A, then A C, spell nothing; A C E is Am and A C E G is Am7. Both
+        # namings go out, so waiting for one can catch the triad on the way.
+        assert collector.wait_for(2)
+        assert [args for _, args in collector.messages] == [
+            ("Am", 9, "m"), ("Am7", 9, "m7")]
 
     def test_a_chord_can_drive_a_wwise_switch_without_anyone_knowing_midi(
             self, bridge, fake_midi, buses):

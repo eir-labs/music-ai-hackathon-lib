@@ -30,7 +30,7 @@ Run `kitlib contract` to see the namespace as teams see it.
 ```
 pip install -e .            # the library and the CLI, nothing else
 pip install -e ".[arduino]" # or [radar], [wwise], [midi], [all]
-pytest                      # 435 tests, no hardware, about fifteen seconds
+pytest                      # 454 tests, no hardware, about fifteen seconds
 ```
 
 Install the extra your track needs rather than `requirements.txt`, which pulls
@@ -113,8 +113,20 @@ the instrument sounds jammed. Handled in `held_after`; do not undo it.
 **MIDI channels are 1 to 16 on hardware and 0 to 15 on the wire.** Converted
 once, inside the MIDI sink. Do not convert again anywhere else.
 
-**The ChordCat's port name is a guess.** It has not been confirmed against the
-device. `kitlib midi --list` is the ground truth; nothing hardcodes a name.
+**The ChordCat's port name is still a guess.** Everything else about its MIDI
+comes from the implementation guide and the manual, but the port string does
+not appear in either. `kitlib midi --list` is the ground truth.
+
+**The ChordCat turns itself off after 20 idle minutes,** and dims its display
+after 5. A dark unit is not an off unit, and an installation left between demos
+will be dead. Auto power off is under Menu > System Settings.
+
+**A MIDI channel picks a ChordCat track.** Its eight tracks listen on USB
+channels 1 to 8 by default, so channel 3 plays track 3.
+
+**The ChordCat ignores control changes outside its documented list,** which
+looks exactly like a broken cable. Use the names in `CONTROLLERS` rather than
+raw numbers.
 
 ## Contributing back
 

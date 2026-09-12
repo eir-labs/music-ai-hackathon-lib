@@ -6,12 +6,17 @@ Neither side has to know what the other is.
 
     /midi/note   <note> <velocity?> <channel?>       velocity 0 releases
     /midi/chord  <ChordName> <velocity?> <channel?>  Cmaj7, F#m, Bb7
-    /midi/cc     <controller> <value> <channel?>
-    /midi/panic  <channel?>                          release everything
+    /midi/cc     <controller> <value> <channel?>     a name or a number
+    /midi/panic  <channel?>                          silence everything
 
 Channels are 1..16 as printed on hardware. MIDI puts 0..15 on the wire and the
 conversion is the single commonest off-by-one in this corner of the world, so
 it happens here, once.
+
+The channel is how you choose a ChordCat track: out of the box its eight
+tracks listen on USB channels 1 to 8, one each, so ``/midi/chord Am7 100 3``
+plays track 3. The device applies its MIDI IN settings to the USB and the DIN
+socket alike, so a USB cable is the whole setup.
 
 Needs ``pip install kitlib[midi]``.
 """
@@ -26,6 +31,31 @@ from ..contract import MIDI_CC, MIDI_CHORD, MIDI_NOTE, MIDI_PANIC
 
 DEFAULT_VELOCITY = 100
 DEFAULT_CHANNEL = 1
+
+#: The control changes the ChordCat acts on, from its MIDI Implementation
+#: Guide. Anything outside this list is accepted here and ignored by the
+#: device, which looks exactly like a broken cable, so prefer the names.
+CONTROLLERS = {
+    "portamento_time": 5,
+    "volume": 7,
+    "pan": 10,
+    "portamento": 65,
+    "resonance": 71,
+    "release": 72,
+    "attack": 73,
+    "cutoff": 74,
+    "reverb": 91,
+    "chorus": 93,
+    "all_sound_off": 120,
+}
+
+#: The device's own way of silencing a channel, rather than a note-off each.
+ALL_SOUND_OFF = CONTROLLERS["all_sound_off"]
+
+#: Out of the box the ChordCat's eight tracks listen on USB channels 1 to 8,
+#: one each. So channel 3 plays track 3 until somebody changes it in
+#: Menu > Track MIDI Settings > MIDI IN.
+TRACKS = 8
 
 
 class CannotReachMidi(RuntimeError):
@@ -130,17 +160,41 @@ class MidiSink:
             self._sound(number, min(level, 127), wire)
 
     def cc(self, _address, controller, value, channel=None) -> None:
-        self.send("control_change", control=int(controller),
+        """Send a control change, by number or by the name it has here.
+
+        ``cc(None, "cutoff", 64)`` and ``cc(None, 74, 64)`` are the same thing.
+        """
+        self.send("control_change", control=self.controller(controller),
                   value=min(max(int(value), 0), 127),
                   channel=self._wire_channel(channel))
 
+    @staticmethod
+    def controller(controller) -> int:
+        """A controller name or number becomes a number."""
+        if isinstance(controller, str) and not controller.lstrip("-").isdigit():
+            try:
+                return CONTROLLERS[controller.strip().lower()]
+            except KeyError:
+                raise ValueError(
+                    f"unknown controller {controller!r}; known: "
+                    f"{', '.join(sorted(CONTROLLERS))}, or pass a number")
+        return min(max(int(controller), 0), 127)
+
     def panic(self, _address, channel=None) -> None:
-        """Release every note this sink has sounded, on one channel or all."""
+        """Silence a channel, or every channel this sink has played on.
+
+        Releases the notes it knows it sounded, then sends All Sound Off, which
+        is the ChordCat's own mechanism and catches anything this sink did not
+        send. Belt and braces, because a stuck note during a demo is the worst
+        kind of bug to debug in front of people.
+        """
         wires = ([self._wire_channel(channel)] if channel is not None
-                 else list(self._sounding))
+                 else sorted(self._sounding) or [self._wire_channel(None)])
         for wire in wires:
             for note in sorted(self._sounding.get(wire, set())):
                 self._release(note, wire)
+            self.send("control_change", control=ALL_SOUND_OFF, value=0,
+                      channel=wire)
 
     # -- wiring ----------------------------------------------------------
 

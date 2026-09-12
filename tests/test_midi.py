@@ -12,7 +12,8 @@ import pytest
 
 from doubles import note_off, note_on
 from kitlib import chords, contract
-from kitlib.sinks.midi import CannotReachMidi, MidiSink
+from kitlib.sinks.midi import (ALL_SOUND_OFF, CONTROLLERS, TRACKS,
+                               CannotReachMidi, MidiSink)
 from kitlib.sources import midi
 
 
@@ -209,6 +210,63 @@ class TestVerbs:
         sink.panic(None)
         assert sorted(port.notes_off()) == sorted([60] + chord_notes("Am"))
 
+    def test_panic_also_sends_the_devices_own_all_sound_off(self, sink, port):
+        """Catches anything this sink did not send, such as a note from the panel.
+
+        A stuck note during a demo is the worst kind of bug to debug in front
+        of people, so both mechanisms fire.
+        """
+        sink.chord(None, "C")
+        sink.panic(None)
+        silences = [m for m in port.of("control_change")
+                    if m.control == ALL_SOUND_OFF]
+        assert [m.value for m in silences] == [0]
+
+    def test_panic_on_a_silent_sink_still_silences_the_channel(self, sink, port):
+        """Nothing sounding here does not mean nothing sounding there."""
+        sink.panic(None)
+        assert [m.control for m in port.of("control_change")] == [ALL_SOUND_OFF]
+
+
+class TestControllers:
+    """The ChordCat acts on a fixed list, from its MIDI Implementation Guide.
+
+    Anything outside it is accepted by the sink and ignored by the device,
+    which looks exactly like a broken cable. Hence the names.
+    """
+
+    @pytest.mark.parametrize("name,number", [
+        ("portamento_time", 5), ("volume", 7), ("pan", 10),
+        ("portamento", 65), ("resonance", 71), ("release", 72),
+        ("attack", 73), ("cutoff", 74), ("reverb", 91), ("chorus", 93),
+        ("all_sound_off", 120),
+    ])
+    def test_each_documented_controller_keeps_its_number(self, name, number):
+        assert CONTROLLERS[name] == number
+
+    def test_a_name_and_its_number_are_the_same_message(self, sink, port):
+        sink.cc(None, "cutoff", 64)
+        sink.cc(None, 74, 64)
+        assert [m.control for m in port.of("control_change")] == [74, 74]
+
+    def test_a_name_is_matched_regardless_of_case_or_spacing(self, sink, port):
+        sink.cc(None, "  Cutoff ", 64)
+        assert port.of("control_change")[0].control == 74
+
+    def test_a_number_arriving_as_text_off_the_bus_still_works(self, sink, port):
+        """OSC arguments come off the command line as strings often enough."""
+        sink.cc(None, "74", 64)
+        assert port.of("control_change")[0].control == 74
+
+    def test_an_unknown_name_says_what_is_known(self, sink):
+        with pytest.raises(ValueError, match="unknown controller"):
+            sink.cc(None, "wobble", 64)
+
+    def test_a_controller_number_the_device_ignores_is_still_sent(self, sink, port):
+        """The sink does not police the device's list; the device does."""
+        sink.cc(None, 3, 64)
+        assert port.of("control_change")[0].control == 3
+
 
 class TestChannels:
     def test_channel_one_on_the_hardware_is_channel_zero_on_the_wire(
@@ -230,6 +288,19 @@ class TestChannels:
         sink.note(None, 60, 100, 99)
         sink.note(None, 61, 100, 0)
         assert [m.channel for m in port.sent] == [15, 0]
+
+    def test_a_channel_addresses_the_chordcat_track_of_the_same_number(
+            self, sink, port):
+        """Out of the box its eight tracks listen on USB channels 1 to 8.
+
+        So channel 3 plays track 3, until somebody changes it under
+        Menu > Track MIDI Settings > MIDI IN.
+        """
+        assert TRACKS == 8
+        for track in range(1, TRACKS + 1):
+            port.sent.clear()
+            sink.note(None, 60, 100, track)
+            assert port.sent[0].channel == track - 1
 
     def test_each_channel_keeps_its_own_sounding_notes(self, sink, port):
         sink.chord(None, "C", channel=1)

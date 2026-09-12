@@ -82,7 +82,7 @@ bus.send("/wwise/rtpc", "Proximity", proximity(reading))
 
 The presets in `signal.py` carry the real ranges out of `sensors/Sensor_Kit_Setup.md`, so `signal.FSR402` already knows the force sensor tops out near 650 rather than 1023, and `signal.LIGHT_LS06S` that its dark reading is 45 rather than 0.
 
-Tests: `pytest`. 435 of them, no hardware required, about fifteen seconds.
+Tests: `pytest`. 454 of them, no hardware required, about fifteen seconds.
 `tests/test_integration.py` holds the cross-track paths and is where a new
 source or verb proves it landed on the contract rather than beside it.
 
